@@ -167,3 +167,63 @@ def is_trading_allowed(dt):
     if dt.hour >= STOP_TRADING_HOUR:
         return False, f"После {STOP_TRADING_HOUR}:00 GMT"
     return True, "OK"
+    
+def check_level_approach(df_1h, df_4h):
+    alerts = []
+    for tf_name, df in [('1H', df_1h), ('4H', df_4h)]:
+        if df is None or df.empty:
+            continue
+        df_calc = calc_all(df)
+        levels = detect_sr_levels(df_calc)
+        last = df_calc.iloc[-1]
+        price = last['close']
+        ema200 = last['ema200']
+        zone = 0.006
+        checks = [
+            ('PDH', levels['pdh'],
+             abs(price - levels['pdh']) / price < zone),
+            ('PDL', levels['pdl'],
+             abs(price - levels['pdl']) / price < zone),
+            ('Сопротивление', levels['resistance'],
+             abs(price - levels['resistance']) / price < zone),
+            ('Поддержка', levels['support'],
+             abs(price - levels['support']) / price < zone),
+            ('EMA200', round(ema200, 2),
+             abs(price - ema200) / price < zone),
+        ]
+        for name, level_price, condition in checks:
+            if condition:
+                alerts.append({
+                    'tf': tf_name,
+                    'type': name,
+                    'price': round(price, 2),
+                    'level': level_price,
+                })
+    return alerts
+
+def get_weekly_stats(trades_history):
+    if not trades_history:
+        return None
+    wins = [t for t in trades_history if t.get('win')]
+    losses = [t for t in trades_history if not t.get('win')]
+    total_pnl = sum(t.get('pnl', 0) for t in trades_history)
+    gross_p = sum(t.get('pnl', 0) for t in wins)
+    gross_l = abs(sum(t.get('pnl', 0) for t in losses))
+    wr = len(wins) / len(trades_history) * 100 if trades_history else 0
+    pf = gross_p / gross_l if gross_l > 0 else 0
+    best = max(trades_history, key=lambda t: t.get('pnl', 0), default=None)
+    worst = min(trades_history, key=lambda t: t.get('pnl', 0), default=None)
+    return {
+        'total': len(trades_history),
+        'wins': len(wins),
+        'losses': len(losses),
+        'wr': round(wr, 1),
+        'pnl': round(total_pnl, 2),
+        'pf': round(pf, 2),
+        'best': best,
+        'worst': worst,
+        'longs': len([t for t in trades_history
+                      if t.get('type') == 'LONG']),
+        'shorts': len([t for t in trades_history
+                       if t.get('type') == 'SHORT']),
+    }
