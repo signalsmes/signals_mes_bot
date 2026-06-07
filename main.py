@@ -1,5 +1,7 @@
 import time
 import schedule
+import threading
+import requests
 from datetime import datetime
 from data_feed import get_multi_timeframe, get_current_price, is_market_open
 from strategy import (
@@ -16,7 +18,7 @@ from telegram_bot import (
     format_weekly_stats, format_morning_briefing,
     format_evening_summary, format_warning_20h, calc_tp
 )
-from config import CHECK_INTERVAL, SYMBOL
+from config import CHECK_INTERVAL, SYMBOL, TELEGRAM_TOKEN, CHAT_ID
 
 state = {
     'last_level': 0,
@@ -30,7 +32,71 @@ state = {
     'day_high': None,
     'day_low': None,
     'last_level_alert': {},
+    'last_update_id': 0,
 }
+
+WELCOME_TEXT = (
+    "Добро пожаловать в MES SIGNALS!\n\n"
+    "Бот анализирует рынок 24/5 и присылает\n"
+    "сигналы для торговли фьючерсом Micro-ES\n"
+    "на индексе S&P500.\n\n"
+    "Каждое утро ты получаешь брифинг\n"
+    "с ключевыми уровнями и новостями дня.\n\n"
+    "Сигналы основаны на авторской стратегии\n"
+    "мультитаймфреймного анализа.\n\n"
+    "ВАЖНО:\n"
+    "Количество контрактов и риски\n"
+    "ты определяешь самостоятельно.\n"
+    "Сигналы носят информационный характер.\n\n"
+    "Удачи в торговле!"
+)
+
+def handle_updates():
+    """Слушает команды от пользователей"""
+    base_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+    while True:
+        try:
+            resp = requests.get(
+                f"{base_url}/getUpdates",
+                params={'offset': state['last_update_id'] + 1, 'timeout': 30},
+                timeout=35
+            )
+            if resp.status_code == 200:
+                updates = resp.json().get('result', [])
+                for update in updates:
+                    state['last_update_id'] = update['update_id']
+                    message = update.get('message', {})
+                    text = message.get('text', '')
+                    chat_id = message.get('chat', {}).get('id')
+
+                    if text == '/start':
+                        requests.post(
+                            f"{base_url}/sendMessage",
+                            json={'chat_id': chat_id, 'text': WELCOME_TEXT},
+                            timeout=10
+                        )
+                        print(f"Welcome sent to {chat_id}")
+
+                    elif text == '/status':
+                        pos = state['open_position']
+                        if pos:
+                            status = (
+                                f"Открытая позиция:\n"
+                                f"{pos['direction']} · {pos['lots']} лот\n"
+                                f"Вход: {pos['entry']}\n"
+                                f"SL: {pos['sl']}"
+                            )
+                        else:
+                            status = "Открытых позиций нет"
+                        requests.post(
+                            f"{base_url}/sendMessage",
+                            json={'chat_id': chat_id, 'text': status},
+                            timeout=10
+                        )
+
+        except Exception as e:
+            print(f"Update handler error: {e}")
+        time.sleep(1)
 
 def morning_briefing():
     if not is_market_open():
@@ -334,7 +400,8 @@ def check_signals():
             'entry': signal['price'],
             'win': None,
             'tp_hit': None,
-            'active': True
+            'active': True,
+            'level': level
         })
 
         state['last_level'] = level
@@ -346,10 +413,25 @@ def check_signals():
 
 def main():
     print("Starting MES Trading Signal Bot...")
-    if not test_connection():
-        print("Telegram connection failed!")
+
+    # Проверяем соединение без приветствия
+    try:
+        resp = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getMe",
+            timeout=10
+        )
+        if resp.status_code != 200:
+            print("Telegram connection failed!")
+            return
+        print("Telegram connected")
+    except Exception as e:
+        print(f"Connection error: {e}")
         return
-    print("Telegram connected")
+
+    # Запускаем обработчик команд в отдельном потоке
+    update_thread = threading.Thread(target=handle_updates, daemon=True)
+    update_thread.start()
+    print("Command handler started (/start, /status)")
 
     schedule.every().day.at("08:00").do(morning_briefing)
     schedule.every().day.at("21:00").do(evening_summary)
