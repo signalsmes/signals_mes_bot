@@ -1,7 +1,7 @@
 import time
 import schedule
 from datetime import datetime
-from data_feed import get_multi_timeframe, get_current_price
+from data_feed import get_multi_timeframe, get_current_price, is_market_open
 from strategy import (
     get_signal_level, get_session, is_trading_allowed,
     check_level_approach, get_weekly_stats
@@ -33,6 +33,9 @@ state = {
 }
 
 def morning_briefing():
+    if not is_market_open():
+        print("Market closed - skipping briefing")
+        return
     today = datetime.utcnow().date()
     if state['last_briefing'] == today:
         return
@@ -80,6 +83,9 @@ def morning_briefing():
         print(f"Briefing error: {e}")
 
 def evening_summary():
+    if not is_market_open():
+        print("Market closed - skipping evening summary")
+        return
     try:
         dfs = get_multi_timeframe(SYMBOL)
         df = dfs.get('15m')
@@ -127,6 +133,8 @@ def weekly_stats():
         print(f"Weekly stats error: {e}")
 
 def check_level_alerts():
+    if not is_market_open():
+        return
     try:
         dfs = get_multi_timeframe(SYMBOL)
         df_1h = dfs.get('1h')
@@ -243,6 +251,9 @@ def check_tp_sl():
         print(f"TP/SL error: {e}")
 
 def check_signals():
+    if not is_market_open():
+        return
+
     now = datetime.utcnow()
 
     if now.hour == 19 and now.minute >= 30 and not state['warned_20h']:
