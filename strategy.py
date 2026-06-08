@@ -18,6 +18,49 @@ def get_tf_data(df):
         'cross_down': bool(last['macd_cross_down']),
     }
 
+def calc_smart_sl(price, direction, levels):
+    """SL за ближайшим уровнем/свингом + запас. Границы 12-25 пунктов."""
+    buffer = 3
+    min_sl = 12
+    max_sl = 25
+
+    if direction == "LONG":
+        below = []
+        for s in levels.get('swing_lows', []):
+            if s < price:
+                below.append(s)
+        below.append(levels.get('support', 0))
+        below.append(levels.get('pdl', 0))
+        below = [b for b in below if b > 0 and b < price]
+        if below:
+            nearest = max(below)
+            sl = nearest - buffer
+            dist = price - sl
+            if dist < min_sl:
+                sl = price - min_sl
+            elif dist > max_sl:
+                sl = price - max_sl
+            return round(sl, 2)
+        return round(price - min_sl, 2)
+    else:
+        above = []
+        for s in levels.get('swing_highs', []):
+            if s > price:
+                above.append(s)
+        above.append(levels.get('resistance', 0))
+        above.append(levels.get('pdh', 0))
+        above = [a for a in above if a > price]
+        if above:
+            nearest = min(above)
+            sl = nearest + buffer
+            dist = sl - price
+            if dist < min_sl:
+                sl = price + min_sl
+            elif dist > max_sl:
+                sl = price + max_sl
+            return round(sl, 2)
+        return round(price + min_sl, 2)
+
 def get_signal_level(dfs):
     tf1 = get_tf_data(dfs.get('1m'))
     tf3 = get_tf_data(dfs.get('3m'))
@@ -25,7 +68,7 @@ def get_signal_level(dfs):
     tf15 = get_tf_data(dfs.get('15m'))
     tf30 = get_tf_data(dfs.get('30m'))
 
-    if not tf3 or not tf15:
+    if not tf3 or not tf15 or not tf5:
         return _no_signal()
 
     price = tf3['price']
@@ -39,18 +82,25 @@ def get_signal_level(dfs):
     if dfs.get('3m') is not None:
         fvg = detect_fvg(dfs.get('3m'))
 
-    senior_bull = tf15['trend'] == 'bull' and (tf30 is None or tf30['trend'] == 'bull')
-    senior_bear = tf15['trend'] == 'bear' and (tf30 is None or tf30['trend'] == 'bear')
+    # СТРОГАЯ согласованность: 30М + 15М + 5М все в одну сторону
+    all_bull = (tf15['trend'] == 'bull' and tf5['trend'] == 'bull' and
+                (tf30 is None or tf30['trend'] == 'bull'))
+    all_bear = (tf15['trend'] == 'bear' and tf5['trend'] == 'bear' and
+                (tf30 is None or tf30['trend'] == 'bear'))
 
-    if not senior_bull and not senior_bear:
+    if not all_bull and not all_bear:
         return _no_signal()
 
-    junior_bull = tf3['macd'] > 0 or tf3['cross_up']
-    junior_bear = tf3['macd'] < 0 or tf3['cross_down']
-    if tf1:
-        junior_bull = junior_bull and tf1['macd'] > 0
-        junior_bear = junior_bear and tf1['macd'] < 0
+    # MACD должен подтверждать на 5М И 3М
+    macd_bull = tf5['macd'] > 0 and (tf3['macd'] > 0 or tf3['cross_up'])
+    macd_bear = tf5['macd'] < 0 and (tf3['macd'] < 0 or tf3['cross_down'])
 
+    if all_bull and not macd_bull:
+        return _no_signal()
+    if all_bear and not macd_bear:
+        return _no_signal()
+
+    # RSI средний по 3М и 1М
     rsi = tf3['rsi']
     if tf1:
         rsi = (tf3['rsi'] + tf1['rsi']) / 2
@@ -62,8 +112,6 @@ def get_signal_level(dfs):
     near_ema = abs(price - tf3['ema200']) / price < 0.003
     level_long = near_pdl or near_sup or near_ema or fvg
     level_short = near_pdh or near_res or near_ema or fvg
-
-    sl_pts = 15
 
     result = _no_signal()
     result['price'] = price
@@ -77,58 +125,39 @@ def get_signal_level(dfs):
 
     rsi_str = str(round(rsi, 1))
 
-    # УРОВЕНЬ 3 — все ТФ согласованы + RSI экстремум
-    if senior_bull and junior_bull and rsi < RSI_EXTREME_LONG and level_long:
+    # УРОВЕНЬ 3 — всё согласовано + RSI экстремум + уровень
+    if all_bull and rsi < RSI_EXTREME_LONG and level_long:
+        sl = calc_smart_sl(price, 'LONG', levels)
         result['level'] = 3
         result['direction'] = 'LONG'
         result['lots'] = SIGNAL_3_LOTS
-        result['sl'] = round(price - sl_pts, 2)
-        result['tp'] = round(price + sl_pts * 2, 2)
+        result['sl'] = sl
         result['reason'] = ['RSI=' + rsi_str, 'Все ТФ бычьи', 'Уровень']
 
-    elif senior_bear and junior_bear and rsi > RSI_EXTREME_SHORT and level_short:
+    elif all_bear and rsi > RSI_EXTREME_SHORT and level_short:
+        sl = calc_smart_sl(price, 'SHORT', levels)
         result['level'] = 3
         result['direction'] = 'SHORT'
         result['lots'] = SIGNAL_3_LOTS
-        result['sl'] = round(price + sl_pts, 2)
-        result['tp'] = round(price - sl_pts * 2, 2)
+        result['sl'] = sl
         result['reason'] = ['RSI=' + rsi_str, 'Все ТФ медвежьи', 'Уровень']
 
-    # УРОВЕНЬ 2 — старшие ТФ + RSI перепродан/перекуплен
-    elif senior_bull and rsi < RSI_OVERSOLD and level_long:
+    # УРОВЕНЬ 2 — всё согласовано + RSI зона + уровень
+    elif all_bull and rsi < RSI_OVERSOLD and level_long:
+        sl = calc_smart_sl(price, 'LONG', levels)
         result['level'] = 2
         result['direction'] = 'LONG'
         result['lots'] = SIGNAL_2_LOTS
-        result['sl'] = round(price - sl_pts, 2)
-        result['tp'] = round(price + sl_pts * 2, 2)
-        result['reason'] = ['RSI=' + rsi_str, '15M бычий', 'Уровень']
+        result['sl'] = sl
+        result['reason'] = ['RSI=' + rsi_str, '5М/15М/30М бычьи', 'Уровень']
 
-    elif senior_bear and rsi > RSI_OVERBOUGHT and level_short:
+    elif all_bear and rsi > RSI_OVERBOUGHT and level_short:
+        sl = calc_smart_sl(price, 'SHORT', levels)
         result['level'] = 2
         result['direction'] = 'SHORT'
         result['lots'] = SIGNAL_2_LOTS
-        result['sl'] = round(price + sl_pts, 2)
-        result['tp'] = round(price - sl_pts * 2, 2)
-        result['reason'] = ['RSI=' + rsi_str, '15M медвежий', 'Уровень']
-
-    # УСРЕДНЕНИЕ — только при экстремальном RSI
-    if result['level'] == 0:
-        if rsi < 25 and senior_bull and level_long:
-            result['level'] = 2
-            result['direction'] = 'LONG'
-            result['lots'] = 1
-            result['sl'] = round(price - sl_pts, 2)
-            result['tp'] = round(price + sl_pts * 2, 2)
-            result['averaging'] = True
-            result['reason'] = ['RSI=' + rsi_str, 'Усреднение']
-        elif rsi > 75 and senior_bear and level_short:
-            result['level'] = 2
-            result['direction'] = 'SHORT'
-            result['lots'] = 1
-            result['sl'] = round(price + sl_pts, 2)
-            result['tp'] = round(price - sl_pts * 2, 2)
-            result['averaging'] = True
-            result['reason'] = ['RSI=' + rsi_str, 'Усреднение']
+        result['sl'] = sl
+        result['reason'] = ['RSI=' + rsi_str, '5М/15М/30М медвежьи', 'Уровень']
 
     return result
 
