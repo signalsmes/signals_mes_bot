@@ -367,8 +367,12 @@ def check_signals():
 
         send_message(msg)
 
-        tp_levels = calc_tp(signal['price'], signal['sl'], direction)
+                signal_msg_id = send_message(msg)
+
+        tp_levels = calc_tp(signal['price'], signal['sl'], direction, signal.get('levels'))
         state['open_position'] = {
+            'signal_msg_id': signal_msg_id,
+
             'direction': direction,
             'entry': signal['price'],
             'sl': signal['sl'],
