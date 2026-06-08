@@ -1,4 +1,4 @@
-import time
+
 import schedule
 import threading
 import requests
@@ -388,4 +388,94 @@ def check_signals():
                 signal.get('averaging')):
             pos = state['open_position']
             if signal['rsi'] < 25 or signal['rsi'] > 75:
-                send_message
+                                send_message(
+                    format_averaging(signal, session),
+                    reply_to=pos.get('signal_msg_id')
+                )
+                pos['lots'] += 1
+                return
+
+        if level == 3:
+            msg = format_signal_3(signal, session)
+        elif level == 2:
+            msg = format_signal_2(signal, session)
+        else:
+            return
+
+        signal_msg_id = send_message(msg)
+
+        tp_levels = calc_tp(signal['price'], signal['sl'], direction, signal.get('levels'))
+        state['open_position'] = {
+            'signal_msg_id': signal_msg_id,
+            'direction': direction,
+            'entry': signal['price'],
+            'sl': signal['sl'],
+            'tp_levels': tp_levels,
+            'lots': signal['lots'],
+            'tp_hit': 0,
+            'entry_time': datetime.utcnow()
+        }
+
+        state['signals_today'].append({
+            'type': direction,
+            'time': now.strftime('%H:%M'),
+            'entry': signal['price'],
+            'win': None,
+            'tp_hit': None,
+            'active': True,
+            'level': level
+        })
+
+        state['last_level'] = level
+        state['last_direction'] = direction
+        state['last_signal_time'] = now
+        print("Signal: " + str(level) + " " + str(direction))
+
+    except Exception as e:
+        print("Signal error: " + str(e))
+
+def main():
+    print("Starting MES Trading Signal Bot...")
+
+    try:
+        resp = requests.get(
+            "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/getMe",
+            timeout=10
+        )
+        if resp.status_code != 200:
+            print("Telegram connection failed!")
+            return
+        print("Telegram connected")
+    except Exception as e:
+        print("Connection error: " + str(e))
+        return
+
+    update_thread = threading.Thread(target=handle_updates, daemon=True)
+    update_thread.start()
+
+    schedule.every().day.at("08:00").do(morning_briefing)
+    schedule.every().day.at("21:00").do(evening_summary)
+    schedule.every().friday.at("20:30").do(weekly_stats)
+    schedule.every().hour.do(check_level_alerts)
+
+    now = datetime.utcnow()
+    if 8 <= now.hour < 10:
+        morning_briefing()
+
+    print("Checking every " + str(CHECK_INTERVAL) + " sec...")
+
+    while True:
+        try:
+            schedule.run_pending()
+            check_signals()
+            time.sleep(CHECK_INTERVAL)
+        except KeyboardInterrupt:
+            print("Stopped")
+            break
+        except Exception as e:
+            print("Error: " + str(e))
+            time.sleep(60)
+
+if __name__ == "__main__":
+    main()
+
