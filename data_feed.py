@@ -4,7 +4,7 @@ from datetime import datetime
 
 SYMBOLS = ["MES=F", "ES=F", "^GSPC"]
 
-def get_price_data(symbol="MES=F", period="5d", interval="3m"):
+def get_price_data(symbol="MES=F", period="1mo", interval="5m"):
     for sym in [symbol] + [s for s in SYMBOLS if s != symbol]:
         try:
             ticker = yf.Ticker(sym)
@@ -12,11 +12,11 @@ def get_price_data(symbol="MES=F", period="5d", interval="3m"):
             if df.empty:
                 continue
             df.columns = [c.lower() for c in df.columns]
-            df = df[['open','high','low','close','volume']].dropna()
+            df = df[['open', 'high', 'low', 'close', 'volume']].dropna()
             if len(df) > 5:
                 return df
         except Exception as e:
-            print(f"Error {sym}: {e}")
+            print("Error " + sym + ": " + str(e))
             continue
     return pd.DataFrame()
 
@@ -35,13 +35,18 @@ def get_current_price(symbol="MES=F"):
     return 0.0
 
 def get_multi_timeframe(symbol="MES=F"):
+    """
+    Периоды увеличены чтобы хватало 200+ свечей для EMA200.
+    1m: 5 дней, 3m: 10 дней, 5m: месяц,
+    15m: 2 месяца, 30m: 3 месяца, 1h: 6 месяцев
+    """
     return {
-        '1m':  get_price_data(symbol, period='1d',  interval='1m'),
-        '3m':  get_price_data(symbol, period='2d',  interval='2m'),
-        '5m':  get_price_data(symbol, period='3d',  interval='5m'),
-        '15m': get_price_data(symbol, period='5d',  interval='15m'),
-        '30m': get_price_data(symbol, period='10d', interval='30m'),
-        '1h':  get_price_data(symbol, period='30d', interval='1h'),
+        '1m':  get_price_data(symbol, period='5d',   interval='1m'),
+        '3m':  get_price_data(symbol, period='10d',  interval='2m'),
+        '5m':  get_price_data(symbol, period='1mo',  interval='5m'),
+        '15m': get_price_data(symbol, period='2mo',  interval='15m'),
+        '30m': get_price_data(symbol, period='3mo',  interval='30m'),
+        '1h':  get_price_data(symbol, period='6mo',  interval='1h'),
     }
 
 def is_market_open():
