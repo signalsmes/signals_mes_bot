@@ -1,4 +1,4 @@
-
+import time
 import schedule
 import threading
 import requests
@@ -388,7 +388,7 @@ def check_signals():
                 signal.get('averaging')):
             pos = state['open_position']
             if signal['rsi'] < 25 or signal['rsi'] > 75:
-                                send_message(
+                send_message(
                     format_averaging(signal, session),
                     reply_to=pos.get('signal_msg_id')
                 )
@@ -478,4 +478,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
