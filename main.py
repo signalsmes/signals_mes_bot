@@ -253,8 +253,9 @@ def check_tp_sl():
         sl_hit = (direction == 'LONG' and price <= sl) or \
                  (direction == 'SHORT' and price >= sl)
 
-        if sl_hit:
-            send_message(format_sl_hit(price, direction))
+                    if sl_hit:
+            send_message(format_sl_hit(price), reply_to=pos.get('signal_msg_id'))
+
             for s in state['signals_today']:
                 if s.get('active'):
                     s['win'] = False
