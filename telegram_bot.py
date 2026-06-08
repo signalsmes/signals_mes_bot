@@ -64,7 +64,6 @@ def get_medal(level):
         return "🥇"
     elif level == 2:
         return "🥈"
-    return "🥉"
 
 def get_level_name(signal):
     levels = signal.get('levels', {})
