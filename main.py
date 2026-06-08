@@ -25,6 +25,8 @@ state = {
     'last_level': 0,
     'last_direction': None,
     'last_signal_time': None,
+    'last_exit_time': None,
+    'last_exit_direction': None,
     'open_position': None,
     'last_briefing': None,
     'warned_20h': False,
@@ -139,6 +141,8 @@ def morning_briefing():
         state['last_level'] = 0
         state['last_direction'] = None
         state['last_signal_time'] = None
+        state['last_exit_time'] = None
+        state['last_exit_direction'] = None
         state['last_level_alert'] = {}
         print("Briefing sent")
     except Exception as e:
@@ -269,6 +273,8 @@ def check_tp_sl():
                             format_strategy_exit(price, direction, pos['entry'], reason),
                             reply_to=msg_id
                         )
+                        state['last_exit_time'] = datetime.utcnow()
+                        state['last_exit_direction'] = direction
                         for s in state['signals_today']:
                             if s.get('active'):
                                 s['win'] = False
@@ -288,6 +294,8 @@ def check_tp_sl():
 
         if sl_hit:
             send_message(format_sl_hit(price), reply_to=msg_id)
+            state['last_exit_time'] = datetime.utcnow()
+            state['last_exit_direction'] = direction
             for s in state['signals_today']:
                 if s.get('active'):
                     s['win'] = False
@@ -317,6 +325,8 @@ def check_tp_sl():
                     state['open_position']['sl'] = pos['entry']
 
                 if is_last:
+                    state['last_exit_time'] = datetime.utcnow()
+                    state['last_exit_direction'] = direction
                     for s in state['signals_today']:
                         if s.get('active'):
                             s['win'] = True
@@ -375,6 +385,20 @@ def check_signals():
         if level == 0:
             return
 
+        # Кулдаун после выхода — 60 минут паузы
+        if state.get('last_exit_time'):
+            mins_since_exit = (now - state['last_exit_time']).seconds / 60
+            if mins_since_exit < 60:
+                return
+
+        # Антиразворот — нельзя противоположный сигнал 60 минут
+        if (state['last_direction'] and direction != state['last_direction']
+                and state['last_signal_time']):
+            mins_since = (now - state['last_signal_time']).seconds / 60
+            if mins_since < 60:
+                return
+
+        # Антиспам — тот же сигнал не чаще раза в 15 минут
         if level == state['last_level'] and direction == state['last_direction']:
             last_t = state['last_signal_time']
             if last_t and (now - last_t).seconds < 900:
@@ -382,18 +406,6 @@ def check_signals():
 
         if level < state['last_level'] and direction == state['last_direction']:
             return
-
-        if (state['open_position'] and
-                direction == state['open_position']['direction'] and
-                signal.get('averaging')):
-            pos = state['open_position']
-            if signal['rsi'] < 25 or signal['rsi'] > 75:
-                send_message(
-                    format_averaging(signal, session),
-                    reply_to=pos.get('signal_msg_id')
-                )
-                pos['lots'] += 1
-                return
 
         if level == 3:
             msg = format_signal_3(signal, session)
