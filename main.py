@@ -6,7 +6,7 @@ from datetime import datetime
 from data_feed import get_multi_timeframe, get_current_price, is_market_open
 from strategy import (
     get_signal_level, get_session, is_trading_allowed,
-    check_level_approach, get_weekly_stats
+    check_level_approach, get_weekly_stats, get_tf_data
 )
 from indicators import calc_all, detect_sr_levels
 from news import get_todays_news
@@ -14,6 +14,7 @@ from telegram_bot import (
     send_message, test_connection,
     format_signal_1, format_signal_2, format_signal_3,
     format_averaging, format_tp_hit, format_sl_hit,
+    format_strategy_exit,
     format_level_alert, format_ema_alert,
     format_weekly_stats, format_morning_briefing,
     format_evening_summary, format_warning_20h, calc_tp
@@ -244,18 +245,49 @@ def check_tp_sl():
         tp_levels = pos['tp_levels']
         sl = pos['sl']
         tp_hit = pos.get('tp_hit', 0)
+        msg_id = pos.get('signal_msg_id')
 
         if state['day_high'] and price > state['day_high']:
             state['day_high'] = price
         if state['day_low'] and price < state['day_low']:
             state['day_low'] = price
 
+        # Раннее закрытие при развороте (позиция держится 2+ часа)
+        entry_time = pos.get('entry_time')
+        if entry_time:
+            hours_held = (datetime.utcnow() - entry_time).seconds / 3600
+            if hours_held >= 2 and tp_hit == 0:
+                tf3 = get_tf_data(dfs.get('3m'))
+                if tf3:
+                    reversed_long = (direction == 'LONG' and
+                                     tf3['rsi'] > 68 and tf3['macd'] < 0)
+                    reversed_short = (direction == 'SHORT' and
+                                      tf3['rsi'] < 32 and tf3['macd'] > 0)
+                    if reversed_long or reversed_short:
+                        reason = "RSI развернулся · MACD против"
+                        send_message(
+                            format_strategy_exit(price, direction, pos['entry'], reason),
+                            reply_to=msg_id
+                        )
+                        for s in state['signals_today']:
+                            if s.get('active'):
+                                s['win'] = False
+                                s['active'] = False
+                                pnl = (price - pos['entry']) * pos['lots'] * 5
+                                if direction == 'SHORT':
+                                    pnl = -pnl
+                                state['week_trades'].append(dict(s, pnl=pnl))
+                        state['open_position'] = None
+                        state['last_level'] = 0
+                        state['last_direction'] = None
+                        state['last_signal_time'] = None
+                        return
+
         sl_hit = (direction == 'LONG' and price <= sl) or \
                  (direction == 'SHORT' and price >= sl)
 
-                    if sl_hit:
-            send_message(format_sl_hit(price), reply_to=pos.get('signal_msg_id'))
-
+        if sl_hit:
+            send_message(format_sl_hit(price), reply_to=msg_id)
             for s in state['signals_today']:
                 if s.get('active'):
                     s['win'] = False
@@ -268,7 +300,7 @@ def check_tp_sl():
             state['last_signal_time'] = None
             return
 
-        for i in range(tp_hit + 1, 5):
+        for i in range(tp_hit + 1, 4):
             tp_key = 'tp' + str(i)
             if tp_key not in tp_levels:
                 continue
@@ -277,8 +309,8 @@ def check_tp_sl():
                   (direction == 'SHORT' and price <= tp_price)
 
             if hit:
-                is_last = i == 4
-                send_message(format_tp_hit(i, price, direction, last=is_last))
+                is_last = i == 3
+                send_message(format_tp_hit(i, price, last=is_last), reply_to=msg_id)
                 state['open_position']['tp_hit'] = i
 
                 if i == 1:
@@ -310,7 +342,10 @@ def check_signals():
         if state['open_position']:
             pos = state['open_position']
             price = get_current_price(SYMBOL)
-            send_message(format_warning_20h(price, pos['direction'], pos['lots']))
+            send_message(
+                format_warning_20h(price, pos['direction'], pos['lots']),
+                reply_to=pos.get('signal_msg_id')
+            )
             state['warned_20h'] = True
         return
 
@@ -353,94 +388,4 @@ def check_signals():
                 signal.get('averaging')):
             pos = state['open_position']
             if signal['rsi'] < 25 or signal['rsi'] > 75:
-                send_message(format_averaging(signal, session))
-                pos['lots'] += 1
-                return
-
-        if level == 1:
-            msg = format_signal_1(signal, session)
-        elif level == 2:
-            msg = format_signal_2(signal, session)
-        elif level == 3:
-            msg = format_signal_3(signal, session)
-        else:
-            return
-
-        send_message(msg)
-
-                signal_msg_id = send_message(msg)
-
-        tp_levels = calc_tp(signal['price'], signal['sl'], direction, signal.get('levels'))
-        state['open_position'] = {
-            'signal_msg_id': signal_msg_id,
-
-            'direction': direction,
-            'entry': signal['price'],
-            'sl': signal['sl'],
-            'tp_levels': tp_levels,
-            'lots': signal['lots'],
-            'tp_hit': 0
-        }
-
-        state['signals_today'].append({
-            'type': direction,
-            'time': now.strftime('%H:%M'),
-            'entry': signal['price'],
-            'win': None,
-            'tp_hit': None,
-            'active': True,
-            'level': level
-        })
-
-        state['last_level'] = level
-        state['last_direction'] = direction
-        state['last_signal_time'] = now
-        print("Signal: " + str(level) + " " + str(direction))
-
-    except Exception as e:
-        print("Signal error: " + str(e))
-
-def main():
-    print("Starting MES Trading Signal Bot...")
-
-    try:
-        resp = requests.get(
-            "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/getMe",
-            timeout=10
-        )
-        if resp.status_code != 200:
-            print("Telegram connection failed!")
-            return
-        print("Telegram connected")
-    except Exception as e:
-        print("Connection error: " + str(e))
-        return
-
-    update_thread = threading.Thread(target=handle_updates, daemon=True)
-    update_thread.start()
-
-    schedule.every().day.at("08:00").do(morning_briefing)
-    schedule.every().day.at("21:00").do(evening_summary)
-    schedule.every().friday.at("20:30").do(weekly_stats)
-    schedule.every().hour.do(check_level_alerts)
-
-    now = datetime.utcnow()
-    if 8 <= now.hour < 10:
-        morning_briefing()
-
-    print("Checking every " + str(CHECK_INTERVAL) + " sec...")
-
-    while True:
-        try:
-            schedule.run_pending()
-            check_signals()
-            time.sleep(CHECK_INTERVAL)
-        except KeyboardInterrupt:
-            print("Stopped")
-            break
-        except Exception as e:
-            print("Error: " + str(e))
-            time.sleep(60)
-
-if __name__ == "__main__":
-    main()
+                send_message
