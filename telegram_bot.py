@@ -6,20 +6,20 @@ BASE_URL = "https://api.telegram.org/bot" + TELEGRAM_TOKEN
 DUBAI_TZ = timezone(timedelta(hours=4))
 NAME = CONTRACT_NAME + " (Micro E-mini S&P 500)"
 
-def send_message(text, parse_mode="HTML"):
+def send_message(text, parse_mode="HTML", reply_to=None):
     try:
-        resp = requests.post(
-            BASE_URL + "/sendMessage",
-            json={"chat_id": CHAT_ID, "text": text, "parse_mode": parse_mode},
-            timeout=10
-        )
-        return resp.status_code == 200
+        payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": parse_mode}
+        if reply_to:
+            payload["reply_to_message_id"] = reply_to
+        resp = requests.post(BASE_URL + "/sendMessage", json=payload, timeout=10)
+        if resp.status_code == 200:
+            return resp.json().get('result', {}).get('message_id')
+        return None
     except Exception as e:
         print("Telegram error: " + str(e))
-        return False
+        return None
 
 def calc_tp(price, sl, direction, levels=None):
-    """TP на реальных уровнях рынка. Максимум 3 TP."""
     dist = abs(price - sl)
     sign = 1 if direction == "LONG" else -1
     fallback = {
@@ -62,8 +62,7 @@ def calc_tp(price, sl, direction, levels=None):
 def get_medal(level):
     if level == 3:
         return "🥇"
-    elif level == 2:
-        return "🥈"
+    return "🥈"
 
 def get_level_name(signal):
     levels = signal.get('levels', {})
@@ -138,38 +137,31 @@ def format_signal_3(signal, session):
 def format_averaging(signal, session):
     return format_signal(signal, session, avg=True)
 
-def format_tp_hit(tp_num, price, direction, last=False):
-    emoji = "🟢" if direction == "LONG" else "🔴"
+def format_tp_hit(tp_num, price, last=False):
     action = "закрой всё" if last else "закрой часть позиции"
     trailing = ""
     if tp_num == 1 and not last:
-        trailing = "\n\nSL → безубыток"
+        trailing = "\nSL → безубыток"
     return (
-        "✅ TP" + str(tp_num) + " · " + NAME + "\n\n"
-        + emoji + " " + direction + " · " + action + "\n"
-        + "Цена: " + str(price)
+        "✅ TP" + str(tp_num) + " достигнут\n"
+        + "Цена: " + str(price) + "\n"
+        + action
         + trailing
     )
 
-def format_sl_hit(price, direction):
-    emoji = "🟢" if direction == "LONG" else "🔴"
+def format_sl_hit(price):
     return (
-        "❌ SL · " + NAME + "\n\n"
-        + emoji + " " + direction + " · позиция закрыта\n"
-        + "Цена: " + str(price) + "\n"
-        + "Уровень SL достигнут"
+        "❌ SL · позиция закрыта\n"
+        + "Цена: " + str(price)
     )
 
 def format_strategy_exit(price, direction, entry, reason_text):
-    emoji = "🟢" if direction == "LONG" else "🔴"
     pts = price - entry if direction == "LONG" else entry - price
     pts = round(pts, 2)
     pts_str = ("+" if pts >= 0 else "") + str(pts)
     return (
-        "⚠️ ВЫХОД · " + NAME + "\n\n"
-        + emoji + " " + direction + " · позиция закрыта\n"
-        + "Причина: стратегия не сработала\n"
-        + reason_text + "\n\n"
+        "⚠️ Позиция закрыта · стратегия не сработала\n"
+        + reason_text + "\n"
         + "Цена: " + str(price) + "\n"
         + "Результат: " + pts_str + " пунктов"
     )
