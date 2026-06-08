@@ -18,71 +18,60 @@ def send_message(text, parse_mode="HTML"):
         print("Telegram error: " + str(e))
         return False
 
-def calc_tp(price, sl, direction):
+def def calc_tp(price, sl, direction, levels=None):
+    """
+    TP на реальных уровнях рынка.
+    Берёт ближайшие уровни/FVG в сторону движения.
+    Максимум 3 TP.
+    """
     dist = abs(price - sl)
+
+    # Запасной вариант если нет уровней
+    fallback = {
+        "tp1": round(price + dist * 1.5 * (1 if direction == "LONG" else -1), 2),
+        "tp2": round(price + dist * 2.5 * (1 if direction == "LONG" else -1), 2),
+        "tp3": round(price + dist * 4.0 * (1 if direction == "LONG" else -1), 2),
+    }
+
+    if not levels:
+        return fallback
+
+    # Собираем все уровни в сторону движения
+    targets = []
     if direction == "LONG":
-        return {
-            "tp1": round(price + dist * 1.0, 2),
-            "tp2": round(price + dist * 1.8, 2),
-            "tp3": round(price + dist * 2.8, 2),
-            "tp4": round(price + dist * 4.0, 2),
-        }
+        candidates = (
+            levels.get('all_resistance', []) +
+            [levels.get('pdh', 0), levels.get('weekly_high', 0)] +
+            levels.get('swing_highs', []) +
+            levels.get('round_numbers', [])
+        )
+        targets = sorted(set([t for t in candidates if t > price + dist * 0.5]))
     else:
-        return {
-            "tp1": round(price - dist * 1.0, 2),
-            "tp2": round(price - dist * 1.8, 2),
-            "tp3": round(price - dist * 2.8, 2),
-            "tp4": round(price - dist * 4.0, 2),
-        }
+        candidates = (
+            levels.get('all_support', []) +
+            [levels.get('pdl', 0), levels.get('weekly_low', 0)] +
+            levels.get('swing_lows', []) +
+            levels.get('round_numbers', [])
+        )
+        targets = sorted(set([t for t in candidates if t < price - dist * 0.5]), reverse=True)
 
-def get_medal(level):
-    if level == 3:
-        return "🥇"
-    elif level == 2:
-        return "🥈"
-    return "🥉"
+    # Если уровней мало — используем запасной вариант
+    if len(targets) < 2:
+        return fallback
 
-def get_level_name(signal):
-    levels = signal.get('levels', {})
-    price = signal['price']
+    result = {}
+    if len(targets) >= 1:
+        result['tp1'] = round(targets[0], 2)
+    if len(targets) >= 2:
+        result['tp2'] = round(targets[1], 2)
+    if len(targets) >= 3:
+        result['tp3'] = round(targets[2], 2)
+    else:
+        # 3й TP механический если нет уровня
+        result['tp3'] = fallback['tp3']
 
-    def near(a, b, pct=0.003):
-        if not b:
-            return False
-        return abs(a - b) / b < pct
+    return result
 
-    names = []
-    if near(price, levels.get('pdh', 0)):
-        names.append('PDH')
-    if near(price, levels.get('pdl', 0)):
-        names.append('PDL')
-    if near(price, signal.get('ema200', 0)):
-        names.append('EMA200')
-    if near(price, levels.get('resistance', 0)):
-        names.append('Сопротивление')
-    if near(price, levels.get('support', 0)):
-        names.append('Поддержка')
-    if near(price, levels.get('weekly_high', 0)):
-        names.append('Weekly High')
-    if near(price, levels.get('weekly_low', 0)):
-        names.append('Weekly Low')
-    for sh in levels.get('swing_highs', []):
-        if near(price, sh):
-            names.append('Swing High')
-            break
-    for slow in levels.get('swing_lows', []):
-        if near(price, slow):
-            names.append('Swing Low')
-            break
-    for rn in levels.get('round_numbers', []):
-        if near(price, rn, 0.002):
-            names.append('Round ' + str(int(rn)))
-            break
-    if signal.get('fvg'):
-        names.append('FVG')
-    if names:
-        return ' · '.join(names)
-    return 'Уровень'
 
 def format_signal(signal, session, avg=False):
     d = signal['direction']
