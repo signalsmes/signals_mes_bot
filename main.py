@@ -200,7 +200,7 @@ def check_level_alerts():
 
         import yfinance as yf
         ticker = yf.Ticker(SYMBOL)
-        df_4h_raw = ticker.history(period='30d', interval='4h')
+        df_4h_raw = ticker.history(period='90d', interval='4h')
         df_4h = None
         if not df_4h_raw.empty:
             df_4h_raw.columns = [c.lower() for c in df_4h_raw.columns]
