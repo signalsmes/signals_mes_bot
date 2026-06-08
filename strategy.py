@@ -37,26 +37,22 @@ def get_signal_level(dfs):
     levels = detect_sr_levels(df15c)
     fvg = detect_fvg(dfs.get('3m')) if dfs.get('3m') is not None else False
 
-    # Старшие ТФ определяют направление
     senior_bull = tf15['trend'] == 'bull' and (tf30 is None or tf30['trend'] == 'bull')
     senior_bear = tf15['trend'] == 'bear' and (tf30 is None or tf30['trend'] == 'bear')
 
     if not senior_bull and not senior_bear:
         return _no_signal()
 
-    # Младшие ТФ подтверждают
     junior_bull = tf3['macd'] > 0 or tf3['cross_up']
     junior_bear = tf3['macd'] < 0 or tf3['cross_down']
     if tf1:
         junior_bull = junior_bull and tf1['macd'] > 0
         junior_bear = junior_bear and tf1['macd'] < 0
 
-    # RSI средний
     rsi = tf3['rsi']
     if tf1:
         rsi = (tf3['rsi'] + tf1['rsi']) / 2
 
-    # Уровни
     near_pdl = abs(price - levels.get('pdl', 0)) / price < 0.004
     near_pdh = abs(price - levels.get('pdh', 0)) / price < 0.004
     near_sup = abs(price - levels.get('support', 0)) / price < 0.003
@@ -65,7 +61,6 @@ def get_signal_level(dfs):
     level_long  = near_pdl or near_sup or near_ema or fvg
     level_short = near_pdh or near_res or near_ema or fvg
 
-    # SL жёсткий максимум 15 пунктов
     sl_pts = 15
 
     result = _no_signal()
@@ -78,53 +73,106 @@ def get_signal_level(dfs):
     result['levels'] = levels
     result['fvg'] = fvg
 
-    # Уровень 3
+    rsi_str = str(round(rsi, 1))
+    rsi3_str = str(round(tf3['rsi'], 1))
+
     if senior_bull and junior_bull and rsi < RSI_EXTREME_LONG and level_long:
-        result.update({'level':3,'direction':'LONG','lots':SIGNAL_3_LOTS,
-            'sl':round(price-sl_pts,2),'tp':round(price+sl_pts*2,2),
-            'reason':[f'RSI={rsi:.1f}','Все ТФ бычьи','Уровень']})
+        result.update({
+            'level': 3,
+            'direction': 'LONG',
+            'lots': SIGNAL_3_LOTS,
+            'sl': round(price - sl_pts, 2),
+            'tp': round(price + sl_pts * 2, 2),
+            'reason': ['RSI=' + rsi_str, 'Все ТФ бычьи', 'Уровень'],
+        })
     elif senior_bear and junior_bear and rsi > RSI_EXTREME_SHORT and level_short:
-        result.update({'level':3,'direction':'SHORT','lots':SIGNAL_3_LOTS,
-            'sl':round(price+sl_pts,2),'tp':round(price-sl_pts*2,2),
-            'reason':[f'RSI={rsi:.1f}','Все ТФ медвежьи','Уровень']})
-
-    # Уровень 2
+        result.update({
+            'level': 3,
+            'direction': 'SHORT',
+            'lots': SIGNAL_3_LOTS,
+            'sl': round(price + sl_pts, 2),
+            'tp': round(price - sl_pts * 2, 2),
+            'reason': ['RSI=' + rsi_str, 'Все ТФ медвежьи', 'Уровень'],
+        })
     elif senior_bull and rsi < RSI_OVERSOLD and level_long:
-        result.update({'level':2,'direction':'LONG','lots':SIGNAL_2_LOTS,
-            'sl':round(price-sl_pts,2),'tp':round(price+sl_pts*2,2),
-            'reason':[f'RSI={rsi:.1f}','15М бычий','Уровень']})
+        result.update({
+            'level': 2,
+            'direction': 'LONG',
+            'lots': SIGNAL_2_LOTS,
+            'sl': round(price - sl_pts, 2),
+            'tp': round(price + sl_pts * 2, 2),
+            'reason': ['RSI=' + rsi_str, '15М бычий', 'Уровень'],
+        })
     elif senior_bear and rsi > RSI_OVERBOUGHT and level_short:
-        result.update({'level':2,'direction':'SHORT','lots':SIGNAL_2_LOTS,
-            'sl':round(price+sl_pts,2),'tp':round(price-sl_pts*2,2),
-            'reason':[f'RSI={rsi:.1f}','15М медвежий','Уровень']})
-
-    # Уровень 1
+        result.update({
+            'level': 2,
+            'direction': 'SHORT',
+            'lots': SIGNAL_2_LOTS,
+            'sl': round(price + sl_pts, 2),
+            'tp': round(price - sl_pts * 2, 2),
+            'reason': ['RSI=' + rsi_str, '15М медвежий', 'Уровень'],
+        })
     elif senior_bull and tf3['rsi'] < 38 and tf3['macd'] < 0 and (level_long or fvg):
-        result.update({'level':1,'direction':'LONG','lots':SIGNAL_1_LOTS,
-            'sl':round(price-sl_pts,2),'tp':round(price+sl_pts*1.5,2),
-            'reason':[f'RSI={tf3["rsi"]}','15М бычий','Ждём']})
+        result.update({
+            'level': 1,
+            'direction': 'LONG',
+            'lots': SIGNAL_1_LOTS,
+            'sl': round(price - sl_pts, 2),
+            'tp': round(price + sl_pts * 1.5, 2),
+            'reason': ['RSI=' + rsi3_str, '15М бычий', 'Ждём'],
+        })
     elif senior_bear and tf3['rsi'] > 62 and tf3['macd'] > 0 and (level_short or fvg):
-        result.update({'level':1,'direction':'SHORT','lots':SIGNAL_1_LOTS,
-            'sl':round(price+sl_pts,2),'tp':round(price-sl_pts*1.5,2),
-            'reason':[f'RSI={tf3["rsi"]}','15М медвежий','Ждём']})
+        result.update({
+            'level': 1,
+            'direction': 'SHORT',
+            'lots': SIGNAL_1_LOTS,
+            'sl': round(price + sl_pts, 2),
+            'tp': round(price - sl_pts * 1.5, 2),
+            'reason': ['RSI=' + rsi3_str, '15М медвежий', 'Ждём'],
+        })
 
-    # Усреднение
     if result['level'] == 0:
         if rsi < 25 and senior_bull and level_long:
-            result.update({'level':2,'direction':'LONG','lots':1,
-                'sl':round(price-sl_pts,2),'tp':round(price+sl_pts*2,2),
-                'averaging':True,'reason':[f'RSI={rsi:.1f}','Усреднение']})
+            result.update({
+                'level': 2,
+                'direction': 'LONG',
+                'lots': 1,
+                'sl': round(price - sl_pts, 2),
+                'tp': round(price + sl_pts * 2, 2),
+                'averaging': True,
+                'reason': ['RSI=' + rsi_str, 'Усреднение'],
+            })
         elif rsi > 75 and senior_bear and level_short:
-            result.update({'level':2,'direction':'SHORT','lots':1,
-                'sl':round(price+sl_pts,2),'tp':round(price-sl_pts*2,2),
-                'averaging':True,'reason':[f'RSI={rsi:.1f}','Усреднение']})
+            result.update({
+                'level': 2,
+                'direction': 'SHORT',
+                'lots': 1,
+                'sl': round(price + sl_pts, 2),
+                'tp': round(price - sl_pts * 2, 2),
+                'averaging': True,
+                'reason': ['RSI=' + rsi_str, 'Усреднение'],
+            })
 
     return result
 
 def _no_signal():
-    return {'level':0,'direction':None,'price':0,'rsi':50,'macd':0,
-        'macd_signal':0,'ema200':0,'trend':'bull','levels':{},'fvg':False,
-        'lots':0,'sl':0,'tp':0,'reason':[],'averaging':False}
+    return {
+        'level': 0,
+        'direction': None,
+        'price': 0,
+        'rsi': 50,
+        'macd': 0,
+        'macd_signal': 0,
+        'ema200': 0,
+        'trend': 'bull',
+        'levels': {},
+        'fvg': False,
+        'lots': 0,
+        'sl': 0,
+        'tp': 0,
+        'reason': [],
+        'averaging': False,
+    }
 
 def get_session(hour_gmt):
     for name, hours in SESSIONS.items():
@@ -136,7 +184,7 @@ def is_trading_allowed(dt):
     if dt.weekday() >= 5:
         return False, "Выходной"
     if dt.hour >= STOP_TRADING_HOUR:
-        return False, f"После {STOP_TRADING_HOUR}:00 GMT"
+        return False, "После " + str(STOP_TRADING_HOUR) + ":00 GMT"
     return True, "OK"
 
 def check_level_approach(df_1h, df_4h):
@@ -151,15 +199,20 @@ def check_level_approach(df_1h, df_4h):
         ema200 = last['ema200']
         zone = 0.006
         checks = [
-            ('PDH', levels['pdh'], abs(price-levels['pdh'])/price < zone),
-            ('PDL', levels['pdl'], abs(price-levels['pdl'])/price < zone),
-            ('Сопротивление', levels['resistance'], abs(price-levels['resistance'])/price < zone),
-            ('Поддержка', levels['support'], abs(price-levels['support'])/price < zone),
-            ('EMA200', round(ema200,2), abs(price-ema200)/price < zone),
+            ('PDH', levels['pdh'], abs(price - levels['pdh']) / price < zone),
+            ('PDL', levels['pdl'], abs(price - levels['pdl']) / price < zone),
+            ('Сопротивление', levels['resistance'], abs(price - levels['resistance']) / price < zone),
+            ('Поддержка', levels['support'], abs(price - levels['support']) / price < zone),
+            ('EMA200', round(ema200, 2), abs(price - ema200) / price < zone),
         ]
         for name, level_price, condition in checks:
             if condition:
-                alerts.append({'tf':tf_name,'type':name,'price':round(price,2),'level':level_price})
+                alerts.append({
+                    'tf': tf_name,
+                    'type': name,
+                    'price': round(price, 2),
+                    'level': level_price,
+                })
     return alerts
 
 def get_weekly_stats(trades_history):
@@ -167,15 +220,22 @@ def get_weekly_stats(trades_history):
         return None
     wins = [t for t in trades_history if t.get('win')]
     losses = [t for t in trades_history if not t.get('win')]
-    total_pnl = sum(t.get('pnl',0) for t in trades_history)
-    gross_p = sum(t.get('pnl',0) for t in wins)
-    gross_l = abs(sum(t.get('pnl',0) for t in losses))
-    wr = len(wins)/len(trades_history)*100 if trades_history else 0
-    pf = gross_p/gross_l if gross_l > 0 else 0
-    best = max(trades_history, key=lambda t: t.get('pnl',0), default=None)
-    worst = min(trades_history, key=lambda t: t.get('pnl',0), default=None)
-    return {'total':len(trades_history),'wins':len(wins),'losses':len(losses),
-        'wr':round(wr,1),'pnl':round(total_pnl,2),'pf':round(pf,2),
-        'best':best,'worst':worst,
-        'longs':len([t for t in trades_history if t.get('type')=='LONG']),
-        'shorts':len([t for t in trades_history if t.get('type')=='SHORT'])}
+    total_pnl = sum(t.get('pnl', 0) for t in trades_history)
+    gross_p = sum(t.get('pnl', 0) for t in wins)
+    gross_l = abs(sum(t.get('pnl', 0) for t in losses))
+    wr = len(wins) / len(trades_history) * 100 if trades_history else 0
+    pf = gross_p / gross_l if gross_l > 0 else 0
+    best = max(trades_history, key=lambda t: t.get('pnl', 0), default=None)
+    worst = min(trades_history, key=lambda t: t.get('pnl', 0), default=None)
+    return {
+        'total': len(trades_history),
+        'wins': len(wins),
+        'losses': len(losses),
+        'wr': round(wr, 1),
+        'pnl': round(total_pnl, 2),
+        'pf': round(pf, 2),
+        'best': best,
+        'worst': worst,
+        'longs': len([t for t in trades_history if t.get('type') == 'LONG']),
+        'shorts': len([t for t in trades_history if t.get('type') == 'SHORT']),
+    }
