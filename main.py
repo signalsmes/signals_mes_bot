@@ -23,6 +23,7 @@ from config import CHECK_INTERVAL, SYMBOL, TELEGRAM_TOKEN, CHAT_ID
 state = {
     'last_level': 0,
     'last_direction': None,
+    'last_signal_time': None,
     'open_position': None,
     'last_briefing': None,
     'warned_20h': False,
@@ -52,7 +53,6 @@ WELCOME_TEXT = (
 )
 
 def handle_updates():
-    """Слушает команды от пользователей"""
     base_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
     while True:
         try:
@@ -68,15 +68,12 @@ def handle_updates():
                     message = update.get('message', {})
                     text = message.get('text', '')
                     chat_id = message.get('chat', {}).get('id')
-
                     if text == '/start':
                         requests.post(
                             f"{base_url}/sendMessage",
                             json={'chat_id': chat_id, 'text': WELCOME_TEXT},
                             timeout=10
                         )
-                        print(f"Welcome sent to {chat_id}")
-
                     elif text == '/status':
                         pos = state['open_position']
                         if pos:
@@ -93,14 +90,12 @@ def handle_updates():
                             json={'chat_id': chat_id, 'text': status},
                             timeout=10
                         )
-
         except Exception as e:
-            print(f"Update handler error: {e}")
+            print(f"Update error: {e}")
         time.sleep(1)
 
 def morning_briefing():
     if not is_market_open():
-        print("Market closed - skipping briefing")
         return
     today = datetime.utcnow().date()
     if state['last_briefing'] == today:
@@ -118,8 +113,8 @@ def morning_briefing():
 
         levels['asiaH'] = round(last['high'] * 1.003, 2)
         levels['asiaL'] = round(last['low'] * 0.997, 2)
-        levels['lonH'] = round(last['high'] * 1.005, 2)
-        levels['lonL'] = round(last['low'] * 0.995, 2)
+        levels['lonH']  = round(last['high'] * 1.005, 2)
+        levels['lonL']  = round(last['low'] * 0.995, 2)
 
         now = datetime.utcnow()
         session = get_session(now.hour)
@@ -142,15 +137,14 @@ def morning_briefing():
         state['day_low'] = price
         state['last_level'] = 0
         state['last_direction'] = None
+        state['last_signal_time'] = None
         state['last_level_alert'] = {}
         print("Briefing sent")
-
     except Exception as e:
         print(f"Briefing error: {e}")
 
 def evening_summary():
     if not is_market_open():
-        print("Market closed - skipping evening summary")
         return
     try:
         dfs = get_multi_timeframe(SYMBOL)
@@ -159,13 +153,13 @@ def evening_summary():
 
         if df is not None and not df.empty:
             close_price = round(df['close'].iloc[-1], 2)
-            open_price = state['day_open'] or round(df['open'].iloc[0], 2)
-            high_price = state['day_high'] or round(df['high'].max(), 2)
-            low_price = state['day_low'] or round(df['low'].min(), 2)
+            open_price  = state['day_open'] or round(df['open'].iloc[0], 2)
+            high_price  = state['day_high'] or round(df['high'].max(), 2)
+            low_price   = state['day_low']  or round(df['low'].min(), 2)
         else:
             open_price = state['day_open'] or close_price
             high_price = state['day_high'] or close_price
-            low_price = state['day_low'] or close_price
+            low_price  = state['day_low']  or close_price
 
         tomorrow_news = get_todays_news()
         tomorrow_text = ""
@@ -175,13 +169,10 @@ def evening_summary():
             )
 
         msg = format_evening_summary(
-            open_p=open_price,
-            close_p=close_price,
-            high_p=high_price,
-            low_p=low_price,
+            open_p=open_price, close_p=close_price,
+            high_p=high_price, low_p=low_price,
             signals_today=state['signals_today'],
-            news_results=[],
-            tomorrow_news=tomorrow_text
+            news_results=[], tomorrow_news=tomorrow_text
         )
         send_message(msg)
         print("Evening summary sent")
@@ -218,30 +209,19 @@ def check_level_alerts():
 
         for alert in alerts:
             key = f"{alert['type']}_{alert['tf']}"
-            last_alert_time = state['last_level_alert'].get(key)
-
-            if last_alert_time:
-                hours_passed = (now - last_alert_time).seconds / 3600
-                if hours_passed < 4:
+            last_time = state['last_level_alert'].get(key)
+            if last_time:
+                if (now - last_time).seconds / 3600 < 4:
                     continue
 
             if alert['type'] == 'EMA200':
-                msg = format_ema_alert(
-                    ema_value=alert['level'],
-                    timeframe=alert['tf']
-                )
+                msg = format_ema_alert(alert['level'], alert['tf'])
             else:
-                msg = format_level_alert(
-                    level_name=alert['type'],
-                    level_price=alert['level'],
-                    timeframe=alert['tf']
-                )
+                msg = format_level_alert(alert['type'], alert['level'], alert['tf'])
 
             send_message(msg)
             state['last_level_alert'][key] = now
-            print(f"Level alert: {alert['type']} {alert['tf']}")
             time.sleep(2)
-
     except Exception as e:
         print(f"Level alert error: {e}")
 
@@ -250,7 +230,7 @@ def check_tp_sl():
         return
     try:
         dfs = get_multi_timeframe(SYMBOL)
-        df = dfs.get('3m')
+        df = dfs.get('1m') or dfs.get('3m')
         if df is None or df.empty:
             return
         price = round(df['close'].iloc[-1], 2)
@@ -275,12 +255,13 @@ def check_tp_sl():
                 if s.get('active'):
                     s['win'] = False
                     s['active'] = False
-                    state['week_trades'].append({
-                        **s, 'pnl': -abs(pos['entry'] - sl) * 5
-                    })
+                    state['week_trades'].append(
+                        {**s, 'pnl': -abs(pos['entry'] - sl) * 5}
+                    )
             state['open_position'] = None
             state['last_level'] = 0
             state['last_direction'] = None
+            state['last_signal_time'] = None
             return
 
         for i in range(tp_hit + 1, 5):
@@ -296,9 +277,9 @@ def check_tp_sl():
                 send_message(format_tp_hit(i, price, direction, last=is_last))
                 state['open_position']['tp_hit'] = i
 
+                # Трейлинг стоп после TP1
                 if i == 1:
                     state['open_position']['sl'] = pos['entry']
-                    print(f"Trailing stop: breakeven {pos['entry']}")
 
                 if is_last:
                     for s in state['signals_today']:
@@ -311,8 +292,8 @@ def check_tp_sl():
                     state['open_position'] = None
                     state['last_level'] = 0
                     state['last_direction'] = None
+                    state['last_signal_time'] = None
                 break
-
     except Exception as e:
         print(f"TP/SL error: {e}")
 
@@ -322,12 +303,11 @@ def check_signals():
 
     now = datetime.utcnow()
 
+    # Предупреждение 19:30 GMT
     if now.hour == 19 and now.minute >= 30 and not state['warned_20h']:
         if state['open_position']:
             pos = state['open_position']
-            dfs = get_multi_timeframe(SYMBOL)
-            df = dfs.get('3m')
-            price = round(df['close'].iloc[-1], 2) if df is not None and not df.empty else 0
+            price = get_current_price(SYMBOL)
             send_message(format_warning_20h(price, pos['direction'], pos['lots']))
             state['warned_20h'] = True
         return
@@ -340,122 +320,15 @@ def check_signals():
 
     try:
         dfs = get_multi_timeframe(SYMBOL)
-        df = dfs.get('3m')
-        if df is None or df.empty or len(df) < 50:
+        df3 = dfs.get('3m')
+        if df3 is None or df3.empty or len(df3) < 50:
             return
 
-        signal = get_signal_level(df)
+        signal = get_signal_level(dfs)
         session = get_session(now.hour)
         level = signal['level']
         direction = signal['direction']
 
         print(f"{now.strftime('%H:%M')} | "
               f"{signal['price']} | "
-              f"RSI:{signal['rsi']} | "
-              f"{level} {direction or ''}")
-
-        if level == 0:
-            return
-
-        if (state['open_position'] and
-                direction == state['open_position']['direction'] and
-                signal.get('averaging')):
-            pos = state['open_position']
-            if signal['rsi'] < 25 or signal['rsi'] > 75:
-                send_message(format_averaging(signal, session))
-                pos['lots'] += 1
-                return
-
-        if (level == state['last_level'] and
-                direction == state['last_direction']):
-            return
-        if (level < state['last_level'] and
-                direction == state['last_direction']):
-            return
-
-        if level == 1:
-            msg = format_signal_1(signal, session)
-        elif level == 2:
-            msg = format_signal_2(signal, session)
-        elif level == 3:
-            msg = format_signal_3(signal, session)
-        else:
-            return
-
-        send_message(msg)
-
-        tp_levels = calc_tp(signal['price'], signal['sl'], direction)
-        state['open_position'] = {
-            'direction': direction,
-            'entry': signal['price'],
-            'sl': signal['sl'],
-            'tp_levels': tp_levels,
-            'lots': signal['lots'],
-            'tp_hit': 0
-        }
-
-        state['signals_today'].append({
-            'type': direction,
-            'time': now.strftime('%H:%M'),
-            'entry': signal['price'],
-            'win': None,
-            'tp_hit': None,
-            'active': True,
-            'level': level
-        })
-
-        state['last_level'] = level
-        state['last_direction'] = direction
-        print(f"Signal: {level} {direction}")
-
-    except Exception as e:
-        print(f"Signal error: {e}")
-
-def main():
-    print("Starting MES Trading Signal Bot...")
-
-    # Проверяем соединение без приветствия
-    try:
-        resp = requests.get(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getMe",
-            timeout=10
-        )
-        if resp.status_code != 200:
-            print("Telegram connection failed!")
-            return
-        print("Telegram connected")
-    except Exception as e:
-        print(f"Connection error: {e}")
-        return
-
-    # Запускаем обработчик команд в отдельном потоке
-    update_thread = threading.Thread(target=handle_updates, daemon=True)
-    update_thread.start()
-    print("Command handler started (/start, /status)")
-
-    schedule.every().day.at("08:00").do(morning_briefing)
-    schedule.every().day.at("21:00").do(evening_summary)
-    schedule.every().friday.at("20:30").do(weekly_stats)
-    schedule.every().hour.do(check_level_alerts)
-
-    now = datetime.utcnow()
-    if 8 <= now.hour < 10:
-        morning_briefing()
-
-    print(f"Checking every {CHECK_INTERVAL} sec...")
-
-    while True:
-        try:
-            schedule.run_pending()
-            check_signals()
-            time.sleep(CHECK_INTERVAL)
-        except KeyboardInterrupt:
-            print("Stopped")
-            send_message("Бот остановлен")
-            break
-        except Exception as e:
-            print(f"Error: {e}")
-            time.sleep(60)
-
-if __name__ == "__main__":
-    main()
+              f"
