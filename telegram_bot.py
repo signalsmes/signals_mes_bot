@@ -1,20 +1,21 @@
 import requests
 from datetime import datetime, timezone, timedelta
-from config import TELEGRAM_TOKEN, CHAT_ID, TICK_VALUE
+from config import TELEGRAM_TOKEN, CHAT_ID, TICK_VALUE, CONTRACT_NAME
 
-BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+BASE_URL = "https://api.telegram.org/bot" + TELEGRAM_TOKEN
 DUBAI_TZ = timezone(timedelta(hours=4))
+NAME = CONTRACT_NAME + " (Micro E-mini S&P 500)"
 
 def send_message(text, parse_mode="HTML"):
     try:
         resp = requests.post(
-            f"{BASE_URL}/sendMessage",
+            BASE_URL + "/sendMessage",
             json={"chat_id": CHAT_ID, "text": text, "parse_mode": parse_mode},
             timeout=10
         )
         return resp.status_code == 200
     except Exception as e:
-        print(f"Telegram error: {e}")
+        print("Telegram error: " + str(e))
         return False
 
 def calc_tp(price, sl, direction):
@@ -39,15 +40,16 @@ def get_medal(level):
         return "🥇"
     elif level == 2:
         return "🥈"
-    else:
-        return "🥉"
+    return "🥉"
 
 def get_level_name(signal):
     levels = signal.get('levels', {})
     price = signal['price']
 
     def near(a, b, pct=0.003):
-        return abs(a - b) / b < pct if b else False
+        if not b:
+            return False
+        return abs(a - b) / b < pct
 
     names = []
     if near(price, levels.get('pdh', 0)):
@@ -68,17 +70,19 @@ def get_level_name(signal):
         if near(price, sh):
             names.append('Swing High')
             break
-    for sl in levels.get('swing_lows', []):
-        if near(price, sl):
+    for slow in levels.get('swing_lows', []):
+        if near(price, slow):
             names.append('Swing Low')
             break
     for rn in levels.get('round_numbers', []):
         if near(price, rn, 0.002):
-            names.append(f'Round {int(rn)}')
+            names.append('Round ' + str(int(rn)))
             break
     if signal.get('fvg'):
         names.append('FVG')
-    return ' · '.join(names) if names else 'Уровень'
+    if names:
+        return ' · '.join(names)
+    return 'Уровень'
 
 def format_signal(signal, session, avg=False):
     d = signal['direction']
@@ -89,15 +93,15 @@ def format_signal(signal, session, avg=False):
     medal = get_medal(signal.get('level', 1))
 
     return (
-        emoji + " " + d + avg_text + " · MESM26 (Micro E-mini S&P 500)\n"
-        f"{medal}\n\n"
-        f"Вход: {signal['price']}\n"
-        f"SL:     {signal['sl']}\n\n"
-        f"TP1:  {tp['tp1']}\n"
-        f"TP2:  {tp['tp2']}\n"
-        f"TP3:  {tp['tp3']}\n"
-        f"TP4:  {tp['tp4']}\n\n"
-        f"📐 {level_name}"
+        emoji + " " + d + avg_text + " · " + NAME + "\n"
+        + medal + "\n\n"
+        + "Вход: " + str(signal['price']) + "\n"
+        + "SL:     " + str(signal['sl']) + "\n\n"
+        + "TP1:  " + str(tp['tp1']) + "\n"
+        + "TP2:  " + str(tp['tp2']) + "\n"
+        + "TP3:  " + str(tp['tp3']) + "\n"
+        + "TP4:  " + str(tp['tp4']) + "\n\n"
+        + "📐 " + level_name
     )
 
 def format_signal_1(signal, session):
@@ -115,54 +119,60 @@ def format_averaging(signal, session):
 def format_tp_hit(tp_num, price, direction, last=False):
     emoji = "🟢" if direction == "LONG" else "🔴"
     action = "закрой всё" if last else "закрой часть позиции"
-    trailing = "\n\nSL → безубыток" if tp_num == 1 and not last else ""
+    trailing = ""
+    if tp_num == 1 and not last:
+        trailing = "\n\nSL → безубыток"
     return (
-        f"✅ TP{tp_num} · MES · Micro E-mini\n\n"
-        f"{emoji} {direction} · {action}\n"
-        f"Цена: {price}"
-        f"{trailing}"
+        "✅ TP" + str(tp_num) + " · " + NAME + "\n\n"
+        + emoji + " " + direction + " · " + action + "\n"
+        + "Цена: " + str(price)
+        + trailing
     )
 
 def format_sl_hit(price, direction):
     emoji = "🟢" if direction == "LONG" else "🔴"
     return (
-        f"❌ SL · MES · Micro E-mini\n\n"
-        f"{emoji} {direction} · позиция закрыта\n"
-        f"Цена: {price}\n"
-        f"Уровень SL достигнут"
+        "❌ SL · " + NAME + "\n\n"
+        + emoji + " " + direction + " · позиция закрыта\n"
+        + "Цена: " + str(price) + "\n"
+        + "Уровень SL достигнут"
     )
 
 def format_level_alert(level_name, level_price, timeframe):
     return (
-        f"📍 УРОВЕНЬ · MES · Micro E-mini\n\n"
-        f"Цена у {level_name} · {timeframe}\n"
-        f"Уровень: {level_price}"
+        "📍 УРОВЕНЬ · " + NAME + "\n\n"
+        + "Цена у " + level_name + " · " + timeframe + "\n"
+        + "Уровень: " + str(level_price)
     )
 
 def format_ema_alert(ema_value, timeframe):
     return (
-        f"📍 УРОВЕНЬ · MES · Micro E-mini\n\n"
-        f"Цена касается EMA200 · {timeframe}\n"
-        f"EMA200: {ema_value}"
+        "📍 УРОВЕНЬ · " + NAME + "\n\n"
+        + "Цена касается EMA200 · " + timeframe + "\n"
+        + "EMA200: " + str(ema_value)
     )
 
 def format_weekly_stats(stats):
     if not stats:
         return "📊 Нет данных за неделю"
     pnl_sign = "+" if stats['pnl'] >= 0 else ""
-    best_pnl = f"+${stats['best']['pnl']:.0f}" if stats.get('best') else "—"
-    worst_pnl = f"-${abs(stats['worst']['pnl']):.0f}" if stats.get('worst') else "—"
+    best_pnl = "—"
+    worst_pnl = "—"
+    if stats.get('best'):
+        best_pnl = "+$" + str(round(stats['best']['pnl']))
+    if stats.get('worst'):
+        worst_pnl = "-$" + str(abs(round(stats['worst']['pnl'])))
     return (
-        f"📊 СТАТИСТИКА НЕДЕЛИ · MES · Micro E-mini\n\n"
-        f"Сделок:  {stats['total']}\n"
-        f"Лонг:    {stats['longs']} · Шорт: {stats['shorts']}\n\n"
-        f"Win Rate: {stats['wr']}%\n"
-        f"Прибыльных: {stats['wins']}\n"
-        f"Убыточных:  {stats['losses']}\n\n"
-        f"P&L:     {pnl_sign}${stats['pnl']:.0f}\n"
-        f"Лучшая:  {best_pnl}\n"
-        f"Худшая:  {worst_pnl}\n\n"
-        f"Profit Factor: {stats['pf']}"
+        "📊 СТАТИСТИКА НЕДЕЛИ · " + NAME + "\n\n"
+        + "Сделок:  " + str(stats['total']) + "\n"
+        + "Лонг:    " + str(stats['longs']) + " · Шорт: " + str(stats['shorts']) + "\n\n"
+        + "Win Rate: " + str(stats['wr']) + "%\n"
+        + "Прибыльных: " + str(stats['wins']) + "\n"
+        + "Убыточных:  " + str(stats['losses']) + "\n\n"
+        + "P&L:     " + pnl_sign + "$" + str(round(stats['pnl'])) + "\n"
+        + "Лучшая:  " + best_pnl + "\n"
+        + "Худшая:  " + worst_pnl + "\n\n"
+        + "Profit Factor: " + str(stats['pf'])
     )
 
 def format_morning_briefing(price, ema200, rsi, levels, news_list, session):
@@ -179,38 +189,48 @@ def format_morning_briefing(price, ema200, rsi, levels, news_list, session):
     all_res = levels.get('all_resistance', [])
     all_sup = levels.get('all_support', [])
 
-    res_set = sorted(set(
-        [levels['pdh']] +
-        all_res[:3] +
-        [r for r in rounds if r > price][:2]
-    ), reverse=True)[:4]
+    res_candidates = [levels['pdh']] + all_res[:3]
+    for r in rounds:
+        if r > price:
+            res_candidates.append(r)
+    res_set = sorted(set(res_candidates), reverse=True)[:4]
 
-    sup_set = sorted(set(
-        [levels['pdl']] +
-        all_sup[:3] +
-        [r for r in rounds if r < price][:2]
-    ), reverse=True)[:4]
+    sup_candidates = [levels['pdl']] + all_sup[:3]
+    for r in rounds:
+        if r < price:
+            sup_candidates.append(r)
+    sup_set = sorted(set(sup_candidates), reverse=True)[:4]
 
     levels_text = "УРОВНИ:\n"
     for l in res_set:
-        tag = "PDH" if l == levels['pdh'] else \
-              "Weekly High" if l == levels.get('weekly_high') else \
-              f"Round {int(l)}" if l in rounds else "Swing"
-        levels_text += f"{l} ▪ {tag}\n"
+        if l == levels['pdh']:
+            tag = "PDH"
+        elif l == levels.get('weekly_high'):
+            tag = "Weekly High"
+        elif l in rounds:
+            tag = "Round " + str(int(l))
+        else:
+            tag = "Swing"
+        levels_text += str(l) + " ▪ " + tag + "\n"
     for l in sup_set:
-        tag = "PDL" if l == levels['pdl'] else \
-              "Weekly Low" if l == levels.get('weekly_low') else \
-              f"Round {int(l)}" if l in rounds else "Swing"
-        levels_text += f"{l} ▪ {tag}\n"
-    levels_text += f"{round(ema200, 1)} ▪ EMA200\n"
+        if l == levels['pdl']:
+            tag = "PDL"
+        elif l == levels.get('weekly_low'):
+            tag = "Weekly Low"
+        elif l in rounds:
+            tag = "Round " + str(int(l))
+        else:
+            tag = "Swing"
+        levels_text += str(l) + " ▪ " + tag + "\n"
+    levels_text += str(round(ema200, 1)) + " ▪ EMA200\n"
 
     return (
-        f"🌅 БРИФИНГ · MES · Micro E-mini\n"
-        f"{date_str} · {time_str} Dubai\n\n"
-        f"Цена: {price}\n\n"
-        f"{levels_text}\n"
-        f"{news_text}"
-        f"{market_news}"
+        "🌅 БРИФИНГ · " + NAME + "\n"
+        + date_str + " · " + time_str + " Dubai\n\n"
+        + "Цена: " + str(price) + "\n\n"
+        + levels_text + "\n"
+        + news_text
+        + market_news
     )
 
 def format_evening_summary(open_p, close_p, high_p, low_p,
@@ -219,60 +239,36 @@ def format_evening_summary(open_p, close_p, high_p, low_p,
     for s in signals_today:
         emoji = "🟢" if s['type'] == 'LONG' else "🔴"
         medal = get_medal(s.get('level', 1))
-        result = f"→ TP{s.get('tp_hit','')} ✅" if s.get('win') else "→ SL ❌"
-        sig_text += f"{emoji} {medal} {s['type']} · {s['time']} · вход {s['entry']} {result}\n"
+        if s.get('win'):
+            result = "→ TP" + str(s.get('tp_hit', '')) + " ✅"
+        else:
+            result = "→ SL ❌"
+        sig_text += emoji + " " + medal + " " + s['type'] + " · " + s['time'] + " · вход " + str(s['entry']) + " " + result + "\n"
     if not sig_text:
         sig_text = "Сигналов не было\n"
 
-    news_text = ""
-    for n in news_results:
-        news_text += f"{n['title']} · факт: {n['actual']} · прогноз: {n['forecast']}\n"
-        news_text += f"  Реакция рынка: {n['reaction']}\n\n"
-    if not news_text:
-        news_text = "Новостей не было\n"
-
     return (
-        f"🌙 ИТОГИ ДНЯ · MES · Micro E-mini\n\n"
-        f"Открытие: {open_p} · Закрытие: {close_p}\n"
-        f"Хай: {high_p} · Лой: {low_p}\n\n"
-        f"НОВОСТИ:\n{news_text}"
-        f"СИГНАЛЫ:\n{sig_text}\n"
-        f"ЗАВТРА:\n"
-        f"PDH: {high_p} · PDL: {low_p}\n"
-        f"{tomorrow_news if tomorrow_news else 'Важных новостей нет'}"
+        "🌙 ИТОГИ ДНЯ · " + NAME + "\n\n"
+        + "Открытие: " + str(open_p) + " · Закрытие: " + str(close_p) + "\n"
+        + "Хай: " + str(high_p) + " · Лой: " + str(low_p) + "\n\n"
+        + "СИГНАЛЫ:\n" + sig_text + "\n"
+        + "ЗАВТРА:\n"
+        + "PDH: " + str(high_p) + " · PDL: " + str(low_p) + "\n"
+        + (tomorrow_news if tomorrow_news else "Важных новостей нет")
     )
 
 def format_warning_20h(price, direction, lots):
     emoji = "🟢" if direction == "LONG" else "🔴"
     return (
-        f"⚠️ 19:30 GMT\n\n"
-        f"{emoji} {direction} · {lots} лот · MES\n"
-        f"Цена: {price}\n\n"
-        f"Закрой позицию до 20:00 GMT"
+        "⚠️ 19:30 GMT\n\n"
+        + emoji + " " + direction + " · " + str(lots) + " лот · " + NAME + "\n"
+        + "Цена: " + str(price) + "\n\n"
+        + "Закрой позицию до 20:00 GMT"
     )
 
 def test_connection():
     try:
-        resp = requests.get(f"{BASE_URL}/getMe", timeout=10)
-        if resp.status_code == 200:
-            name = resp.json()['result']['first_name']
-            send_message(
-                f"<b>{name}</b>\n\n"
-                f"Добро пожаловать в MES SIGNALS!\n\n"
-                f"Бот анализирует рынок 24/5 и присылает\n"
-                f"сигналы для торговли фьючерсом Micro-ES\n"
-                f"на индексе S&P500.\n\n"
-                f"Каждое утро ты получаешь брифинг\n"
-                f"с ключевыми уровнями и новостями дня.\n\n"
-                f"Сигналы основаны на авторской стратегии\n"
-                f"мультитаймфреймного анализа.\n\n"
-                f"ВАЖНО:\n"
-                f"Количество контрактов и риски\n"
-                f"ты определяешь самостоятельно.\n"
-                f"Сигналы носят информационный характер.\n\n"
-                f"Удачи в торговле!"
-            )
-            return True
-        return False
+        resp = requests.get(BASE_URL + "/getMe", timeout=10)
+        return resp.status_code == 200
     except:
         return False
