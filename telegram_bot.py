@@ -89,7 +89,7 @@ def format_signal(signal, session, avg=False):
     medal = get_medal(signal.get('level', 1))
 
     return (
-        f"{emoji} {d}{avg_text} · MES · Micro E-mini\n"
+        emoji + " " + d + avg_text + " · MESM26 (Micro E-mini S&P 500)\n"
         f"{medal}\n\n"
         f"Вход: {signal['price']}\n"
         f"SL:     {signal['sl']}\n\n"
