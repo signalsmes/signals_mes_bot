@@ -76,8 +76,8 @@ def get_signal_level(dfs):
     result['fvg'] = fvg
 
     rsi_str = str(round(rsi, 1))
-    rsi3_str = str(round(tf3['rsi'], 1))
 
+    # УРОВЕНЬ 3 — все ТФ согласованы + RSI экстремум
     if senior_bull and junior_bull and rsi < RSI_EXTREME_LONG and level_long:
         result['level'] = 3
         result['direction'] = 'LONG'
@@ -94,6 +94,7 @@ def get_signal_level(dfs):
         result['tp'] = round(price - sl_pts * 2, 2)
         result['reason'] = ['RSI=' + rsi_str, 'Все ТФ медвежьи', 'Уровень']
 
+    # УРОВЕНЬ 2 — старшие ТФ + RSI перепродан/перекуплен
     elif senior_bull and rsi < RSI_OVERSOLD and level_long:
         result['level'] = 2
         result['direction'] = 'LONG'
@@ -110,22 +111,7 @@ def get_signal_level(dfs):
         result['tp'] = round(price - sl_pts * 2, 2)
         result['reason'] = ['RSI=' + rsi_str, '15M медвежий', 'Уровень']
 
-    elif senior_bull and tf3['rsi'] < 38 and tf3['macd'] < 0 and (level_long or fvg):
-        result['level'] = 1
-        result['direction'] = 'LONG'
-        result['lots'] = SIGNAL_1_LOTS
-        result['sl'] = round(price - sl_pts, 2)
-        result['tp'] = round(price + sl_pts * 1.5, 2)
-        result['reason'] = ['RSI=' + rsi3_str, '15M бычий', 'Ждём']
-
-    elif senior_bear and tf3['rsi'] > 62 and tf3['macd'] > 0 and (level_short or fvg):
-        result['level'] = 1
-        result['direction'] = 'SHORT'
-        result['lots'] = SIGNAL_1_LOTS
-        result['sl'] = round(price + sl_pts, 2)
-        result['tp'] = round(price - sl_pts * 1.5, 2)
-        result['reason'] = ['RSI=' + rsi3_str, '15M медвежий', 'Ждём']
-
+    # УСРЕДНЕНИЕ — только при экстремальном RSI
     if result['level'] == 0:
         if rsi < 25 and senior_bull and level_long:
             result['level'] = 2
