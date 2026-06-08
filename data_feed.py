@@ -36,8 +36,11 @@ def get_current_price(symbol="MES=F"):
 
 def get_multi_timeframe(symbol="MES=F"):
     return {
+        '1m':  get_price_data(symbol, period='1d',  interval='1m'),
         '3m':  get_price_data(symbol, period='2d',  interval='2m'),
+        '5m':  get_price_data(symbol, period='3d',  interval='5m'),
         '15m': get_price_data(symbol, period='5d',  interval='15m'),
+        '30m': get_price_data(symbol, period='10d', interval='30m'),
         '1h':  get_price_data(symbol, period='30d', interval='1h'),
     }
 
