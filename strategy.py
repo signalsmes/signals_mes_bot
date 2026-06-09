@@ -82,14 +82,21 @@ def get_signal_level(dfs):
     if dfs.get('3m') is not None:
         fvg = detect_fvg(dfs.get('3m'))
 
-    # СТРОГАЯ согласованность: 30М + 15М + 5М все в одну сторону
+    # 15М тренд + 5М зона + 3М сигнал согласованы
     all_bull = (tf15['trend'] == 'bull' and tf5['trend'] == 'bull' and
-                (tf30 is None or tf30['trend'] == 'bull'))
+                tf3['trend'] == 'bull')
     all_bear = (tf15['trend'] == 'bear' and tf5['trend'] == 'bear' and
-                (tf30 is None or tf30['trend'] == 'bear'))
+                tf3['trend'] == 'bear')
 
     if not all_bull and not all_bear:
         return _no_signal()
+
+    # 1М подтверждает вход (MACD в сторону движения)
+    if tf1:
+        if all_bull and not (tf1['macd'] > 0 or tf1['cross_up']):
+            return _no_signal()
+        if all_bear and not (tf1['macd'] < 0 or tf1['cross_down']):
+            return _no_signal()
 
     # MACD должен подтверждать на 5М И 3М
     macd_bull = tf5['macd'] > 0 and (tf3['macd'] > 0 or tf3['cross_up'])
@@ -149,7 +156,7 @@ def get_signal_level(dfs):
         result['direction'] = 'LONG'
         result['lots'] = SIGNAL_2_LOTS
         result['sl'] = sl
-        result['reason'] = ['RSI=' + rsi_str, '5М/15М/30М бычьи', 'Уровень']
+        result['reason'] = ['RSI=' + rsi_str, '15М/5М/3М бычьи', 'Уровень']
 
     elif all_bear and rsi > RSI_OVERBOUGHT and level_short:
         sl = calc_smart_sl(price, 'SHORT', levels)
@@ -157,7 +164,7 @@ def get_signal_level(dfs):
         result['direction'] = 'SHORT'
         result['lots'] = SIGNAL_2_LOTS
         result['sl'] = sl
-        result['reason'] = ['RSI=' + rsi_str, '5М/15М/30М медвежьи', 'Уровень']
+        result['reason'] = ['RSI=' + rsi_str, '15М/5М/3М медвежьи', 'Уровень']
 
     return result
 
